@@ -1,0 +1,1 @@
+# Dominio - Núcleo del hexágono

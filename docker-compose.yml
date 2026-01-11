@@ -1,0 +1,13 @@
+version: '3.8'
+
+services:
+  agenda-ai:
+    build: .
+    ports:
+      - "8501:8501"
+    environment:
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
+      - AGENDA_FILE=agenda.xlsx
+    volumes:
+      - ./agenda.xlsx:/app/agenda.xlsx
+    restart: unless-stopped
