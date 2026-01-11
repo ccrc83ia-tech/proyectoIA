@@ -9,11 +9,14 @@ from datetime import datetime
 class LangChainAgentAdapter(AIAgentPort):
     """Adaptador LangChain que respeta los principios hexagonales."""
 
-    def __init__(self, agenda_service: AgendaServicePort, api_key: str):
+    def __init__(self, agenda_service: AgendaServicePort, api_key: str, company_name: str = "Tu Empresa"):
+        if not agenda_service:
+            raise ValueError("agenda_service no puede ser None")
         if not api_key:
             raise ValueError("GEMINI_API_KEY es obligatoria")
         
         self.agenda_service = agenda_service
+        self.company_name = company_name
         
         # Configurar LLM con LangChain
         self.llm = ChatGoogleGenerativeAI(
@@ -24,27 +27,34 @@ class LangChainAgentAdapter(AIAgentPort):
         
         # Prompt template
         self.prompt = PromptTemplate(
-            input_variables=["query", "history", "current_date", "user_name"],
+            input_variables=["query", "history", "current_date", "user_name", "company_name"],
             template="""
-Eres un asistente de agenda inteligente de Audifarma.
+Eres un asistente de agenda inteligente de {company_name}.
 
 Fecha actual: {current_date}
-Usuario: {user_name}
-Historial: {history}
+Usuario conocido: {user_name}
+Historial reciente: {history}
 
-Analiza la consulta del usuario y determina qué acción realizar:
-1. AGREGAR evento: "AGREGAR|nombre|YYYY-MM-DD|HH:MM"
-2. CONSULTAR eventos: "CONSULTAR|YYYY-MM-DD"
-3. ELIMINAR evento: "ELIMINAR|nombre|YYYY-MM-DD"
-4. LISTAR todos: "LISTAR"
-5. NOMBRE usuario: "NOMBRE|nombre_usuario"
+IMPORTANTE: Si el usuario dice su nombre (ej: "hola, soy camilo"), responde con: NOMBRE|nombre_del_usuario
 
-Si el usuario dice "mañana", "hoy", "pasado mañana", calcula la fecha correcta basándote en la fecha actual.
-Si no conoces el nombre del usuario, pregunta por él primero.
-Usa el nombre del usuario en tus respuestas para personalizar la experiencia.
-Recuerda que trabajas para Audifarma y ayudas con la gestión de agenda.
+Si ya conoces al usuario, analiza su consulta y determina qué acción realizar:
+1. Para crear eventos: "AGREGAR|descripcion_evento|YYYY-MM-DD|HH:MM"
+2. Para consultar fecha específica: "CONSULTAR|YYYY-MM-DD"
+3. Para ver todos los eventos: "LISTAR"
+4. Para eliminar: "ELIMINAR|nombre_evento|YYYY-MM-DD"
 
-Consulta: {query}
+Ejemplos de interpretación:
+- "crear evento mañana 9 am" → AGREGAR|evento|2024-01-16|09:00
+- "agendar reunión mañana 9" → AGREGAR|reunión|2024-01-16|09:00
+- "ver eventos" o "listar" → LISTAR
+- "qué tengo mañana" → CONSULTAR|2024-01-16
+
+Calcula fechas relativas basado en {current_date}:
+- "hoy" = {current_date}
+- "mañana" = día siguiente
+- "pasado mañana" = dos días después
+
+Consulta del usuario: {query}
 
 Responde SOLO con el formato de acción correspondiente:
 """
@@ -57,7 +67,8 @@ Responde SOLO con el formato de acción correspondiente:
     def _validate_date(self, fecha: str) -> bool:
         """Valida formato de fecha."""
         try:
-            datetime.strptime(fecha, "%Y-%m-%d")
+            from datetime import datetime
+            datetime.fromisoformat(fecha)
             return True
         except ValueError:
             return False
@@ -76,11 +87,11 @@ Responde SOLO con el formato de acción correspondiente:
             if command == "NOMBRE" and len(parts) == 2:
                 _, nombre = parts
                 self.user_name = nombre.strip()
-                return f"¡Hola {self.user_name}! Es un placer conocerte. Soy tu asistente de agenda de Audifarma y estoy aquí para ayudarte con la gestión de tu agenda personal."
+                return f"¡Hola {self.user_name}! Es un placer conocerte. Soy tu asistente de agenda de {self.company_name} y estoy aquí para ayudarte con la gestión de tu agenda personal."
             
             # Si no conocemos el nombre, preguntar primero
             if not self.user_name:
-                return "¡Hola! Soy tu asistente de agenda de Audifarma. Antes de ayudarte, ¿podrías decirme tu nombre?"
+                return f"¡Hola! Soy tu asistente de agenda de {self.company_name}. Antes de ayudarte, ¿podrías decirme tu nombre?"
             
             if command == "AGREGAR" and len(parts) == 4:
                 _, evento, fecha, hora = parts
@@ -123,31 +134,61 @@ Responde SOLO con el formato de acción correspondiente:
     def process_natural_language(self, query: str) -> str:
         """Implementa el puerto AIAgentPort usando LangChain."""
         try:
+            # Detectar si el usuario dice su nombre directamente
+            query_lower = query.lower().strip()
+            
+            # Si no tenemos nombre y el usuario responde con solo una palabra (probable nombre)
+            if not self.user_name:
+                # Casos: "camilo", "soy camilo", "me llamo camilo", "hola soy camilo"
+                if len(query.strip().split()) == 1 and query.strip().isalpha():
+                    # Solo una palabra alfabética = nombre
+                    self.user_name = query.strip().capitalize()
+                    return f"¡Hola {self.user_name}! Es un placer conocerte. Soy tu asistente de agenda de {self.company_name} y estoy aquí para ayudarte con la gestión de tu agenda personal."
+                elif "soy" in query_lower or "me llamo" in query_lower:
+                    # Extraer nombre de frases como "hola, soy camilo" o "me llamo juan"
+                    words = query_lower.replace(",", "").split()
+                    if "soy" in words:
+                        idx = words.index("soy")
+                        if idx + 1 < len(words):
+                            self.user_name = words[idx + 1].capitalize()
+                    elif "llamo" in words:
+                        idx = words.index("llamo")
+                        if idx + 1 < len(words):
+                            self.user_name = words[idx + 1].capitalize()
+                    
+                    if self.user_name:
+                        return f"¡Hola {self.user_name}! Es un placer conocerte. Soy tu asistente de agenda de {self.company_name} y estoy aquí para ayudarte con la gestión de tu agenda personal."
+            
             # Agregar a historial (memoria de conversación)
             self.conversation_history.append(f"Usuario: {query}")
             
-            # Mantener solo últimas 10 interacciones
-            if len(self.conversation_history) > 10:
-                self.conversation_history = self.conversation_history[-10:]
+            # Mantener solo últimas 6 interacciones para el contexto
+            if len(self.conversation_history) > 12:
+                self.conversation_history = self.conversation_history[-12:]
             
             # Obtener fecha actual
             current_date = datetime.now().strftime("%Y-%m-%d")
             
-            # Procesar con LangChain
-            history = "\n".join(self.conversation_history[-6:])  
-            formatted_prompt = self.prompt.format(
-                query=query, 
-                history=history,
-                current_date=current_date,
-                user_name=self.user_name or "Usuario desconocido"
-            )
-            
-            # Invocar LLM con LangChain
-            result = self.llm.invoke(formatted_prompt)
-            action = result.content.strip()
-            
-            # Ejecutar acción
-            response = self._execute_action(action)
+            # Procesar con LangChain solo si tenemos nombre
+            if self.user_name:
+                history = "\n".join(self.conversation_history[-6:])  # Solo últimas 6 para contexto
+                formatted_prompt = self.prompt.format(
+                    query=query, 
+                    history=history,
+                    current_date=current_date,
+                    user_name=self.user_name,
+                    company_name=self.company_name
+                )
+                
+                # Invocar LLM con LangChain
+                result = self.llm.invoke(formatted_prompt)
+                action = result.content.strip()
+                
+                # Ejecutar acción
+                response = self._execute_action(action)
+            else:
+                # Si no tenemos nombre, pedirlo
+                response = f"¡Hola! Soy tu asistente de agenda de {self.company_name}. Antes de ayudarte, ¿podrías decirme tu nombre?"
             
             # Agregar respuesta al historial
             self.conversation_history.append(f"Asistente: {response}")

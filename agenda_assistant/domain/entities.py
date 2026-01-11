@@ -16,7 +16,7 @@ class AgendaEvent:
     def _validate(self):
         """Valida el formato de fecha y hora"""
         try:
-            datetime.strptime(self.fecha, '%Y-%m-%d')
+            datetime.fromisoformat(self.fecha)
             datetime.strptime(self.hora, '%H:%M')
         except ValueError as e:
             raise ValueError(f"Formato inválido: {str(e)}")
@@ -30,6 +30,12 @@ class AgendaEvent:
 
     @classmethod
     def from_dict(cls, data: dict) -> 'AgendaEvent':
+        # Validar claves requeridas
+        required_keys = ['Evento', 'Fecha', 'Hora']
+        for key in required_keys:
+            if key not in data:
+                raise ValueError(f"Clave requerida '{key}' no encontrada")
+        
         return cls(
             evento=data['Evento'],
             fecha=data['Fecha'],
@@ -42,3 +48,10 @@ class EventQuery:
     """Value Object para consultas"""
     fecha: Optional[str] = None
     evento: Optional[str] = None
+    
+    def __post_init__(self):
+        if self.fecha:
+            try:
+                datetime.fromisoformat(self.fecha)
+            except ValueError:
+                raise ValueError(f"Fecha inválida: {self.fecha}. Use formato YYYY-MM-DD")

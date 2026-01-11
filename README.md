@@ -5,8 +5,8 @@ Asistente inteligente que utiliza **LangChain como framework principal** para ge
 ## Arquitectura del Proyecto
 
 ```
-prueba/
-├── hexagonal/
+proyecto/
+├── agenda_assistant/
 │   ├── domain/
 │   │   └── entities.py           # Entidades de negocio
 │   ├── application/
@@ -65,10 +65,32 @@ streamlit run app_hexagonal.py
 ```
 
 ### Docker (Opcional)
+**Instalación en Ubuntu:**
 ```bash
+# Instalar Docker
+sudo apt update
+sudo apt install docker.io
+sudo systemctl start docker
+sudo systemctl enable docker
+
+# Agregar usuario al grupo docker (opcional, evita usar sudo)
+sudo usermod -aG docker $USER
+# Reiniciar sesión después de este comando
+```
+
+**Generar imagen:**
+```bash
+# Verificar Docker
+docker --version
+
+# Construir imagen
 docker build -t agenda-ai .
+
+# Ejecutar contenedor
 docker run -p 8501:8501 -e GEMINI_API_KEY=tu_key agenda-ai
 ```
+
+**Acceder:** http://localhost:8501
 
 ## Ejemplos de Uso
 

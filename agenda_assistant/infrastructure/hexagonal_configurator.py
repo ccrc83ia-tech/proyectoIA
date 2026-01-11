@@ -18,6 +18,7 @@ class HexagonalConfigurator:
         # Obtener configuración
         agenda_file = os.getenv("AGENDA_FILE", "agenda.xlsx")
         api_key = os.getenv("GEMINI_API_KEY")
+        company_name = os.getenv("COMPANY_NAME", "Tu Empresa")
         
         # Validación mínima (responsabilidad del configurador)
         if not api_key:
@@ -31,7 +32,7 @@ class HexagonalConfigurator:
         agenda_service = AgendaService(repository_port)
         
         # 3. Puerto primario (entrada) - IA
-        ai_agent_port = LangChainAgentAdapter(agenda_service, api_key)
+        ai_agent_port = LangChainAgentAdapter(agenda_service, api_key, company_name)
         
         # 4. Puerto primario (entrada) - UI
         ui_adapter = StreamlitAdapter(ai_agent_port)

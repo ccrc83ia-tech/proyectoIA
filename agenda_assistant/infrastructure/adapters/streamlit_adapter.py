@@ -7,7 +7,10 @@ class StreamlitAdapter:
     """Adaptador de entrada para interfaz web con Streamlit."""
     
     def __init__(self, ai_agent: AIAgentPort):
-        self.ai_agent = ai_agent
+        # Guardar el agente en session_state para persistir memoria
+        if 'ai_agent' not in st.session_state:
+            st.session_state.ai_agent = ai_agent
+        self.ai_agent = st.session_state.ai_agent
     
     def render_ui(self) -> None:
         """Renderiza la interfaz de usuario."""
@@ -17,7 +20,7 @@ class StreamlitAdapter:
             layout="wide"
         )
         
-        st.title("Asistente de Agenda IA - Audifarma")
+        st.title("Asistente de Agenda IA - Pragma")
         st.caption("Usando LangChain como framework principal")
         st.markdown("---")
         
@@ -25,7 +28,7 @@ class StreamlitAdapter:
         if 'messages' not in st.session_state:
             st.session_state.messages = [{
                 "role": "assistant", 
-                "content": "¡Hola! Soy tu asistente de agenda de Audifarma con LangChain. Antes de comenzar, ¿podrías decirme tu nombre?"
+                "content": "¡Hola! Soy tu asistente de agenda de Pragma. Antes de ayudarte, ¿podrías decirme tu nombre?"
             }]
         
         # Mostrar historial
