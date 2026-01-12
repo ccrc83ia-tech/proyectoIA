@@ -1,8 +1,16 @@
-# Python
+# Archivos de configuración sensibles
+.env
+*.env
+.env.*
+
+# Archivos de Python
 __pycache__/
 *.py[cod]
 *$py.class
 *.so
+*.pyc
+*.pyo
+*.pyd
 .Python
 build/
 develop-eggs/
@@ -19,27 +27,68 @@ wheels/
 *.egg-info/
 .installed.cfg
 *.egg
+PIPFILE.lock
 
-# Virtual environments
-venv/
-env/
-ENV/
+# Archivos de Excel generados
+*.xlsx
+*.xls
+agenda.xlsx
+agenda_*.xlsx
+agenda_exportada*.xlsx
 
-# Environment variables
-.env
-
-# Excel files (opcional - descomenta si no quieres versionar la agenda)
-# agenda.xlsx
-
-# Streamlit
-.streamlit/
+# Logs
+*.log
+logs/
+*.log.*
 
 # IDE
 .vscode/
 .idea/
 *.swp
 *.swo
+*~
 
-# OS
+# Sistema
 .DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
 Thumbs.db
+desktop.ini
+
+# Streamlit
+.streamlit/
+
+# Jupyter Notebook
+.ipynb_checkpoints
+
+# pyenv
+.python-version
+
+# pipenv
+Pipfile.lock
+
+# Environments
+venv/
+ENV/
+env/
+.venv/
+.ENV/
+.env/
+
+# Docker
+.dockerignore
+
+# Temporary files
+*.tmp
+*.temp
+*.bak
+*.backup
+
+# OS generated files
+.fuse_hidden*
+.directory
+.Trash-*
+.nfs*

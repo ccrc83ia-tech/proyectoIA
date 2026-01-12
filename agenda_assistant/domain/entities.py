@@ -17,9 +17,13 @@ class AgendaEvent:
         """Valida el formato de fecha y hora"""
         try:
             datetime.fromisoformat(self.fecha)
+        except ValueError:
+            raise ValueError(f"Fecha inválida: {self.fecha}. Use formato YYYY-MM-DD")
+        
+        try:
             datetime.strptime(self.hora, '%H:%M')
-        except ValueError as e:
-            raise ValueError(f"Formato inválido: {str(e)}")
+        except ValueError:
+            raise ValueError(f"Hora inválida: {self.hora}. Use formato HH:MM")
 
     def to_dict(self) -> dict:
         return {

@@ -24,6 +24,16 @@ class AgendaServicePort(ABC):
     def get_all_events(self) -> str:
         """Obtiene todos los eventos"""
         pass
+    
+    @abstractmethod
+    def delete_all_events(self) -> str:
+        """Elimina todos los eventos"""
+        pass
+    
+    @abstractmethod
+    def export_agenda(self, export_path: str = None) -> str:
+        """Exporta la agenda a Excel"""
+        pass
 
 class AIAgentPort(ABC):
     """Puerto de entrada - Interfaz del agente de IA"""

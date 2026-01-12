@@ -18,11 +18,24 @@ class HexagonalConfigurator:
         # Obtener configuración
         agenda_file = os.getenv("AGENDA_FILE", "agenda.xlsx")
         api_key = os.getenv("GEMINI_API_KEY")
+        
+        # Si la API key es una referencia a otra variable, resolverla
+        if api_key and api_key.startswith("KEY_"):
+            api_key = os.getenv(api_key)
+        
         company_name = os.getenv("COMPANY_NAME", "Tu Empresa")
         
-        # Validación mínima (responsabilidad del configurador)
+        # Si no hay API key en .env, usar input de Streamlit
         if not api_key:
-            raise ValueError("GEMINI_API_KEY es obligatoria")
+            import streamlit as st
+            api_key = st.text_input(
+                "Ingresa tu GEMINI_API_KEY:", 
+                type="password",
+                help="Obtén tu API Key en: https://aistudio.google.com/app/api-keys"
+            )
+            if not api_key:
+                st.warning("⚠️ Ingresa tu API Key para continuar")
+                st.stop()
         
         # Inyección de dependencias hexagonal:
         # 1. Puerto secundario (salida)

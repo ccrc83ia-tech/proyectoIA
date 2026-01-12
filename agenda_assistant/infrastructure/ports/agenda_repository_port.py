@@ -24,3 +24,13 @@ class AgendaRepositoryPort(ABC):
     def delete(self, evento: str, fecha: str) -> bool:
         """Elimina un evento específico"""
         pass
+    
+    @abstractmethod
+    def delete_all(self) -> bool:
+        """Elimina todos los eventos"""
+        pass
+    
+    @abstractmethod
+    def export_to_excel(self, export_path: str) -> bool:
+        """Exporta la agenda a un archivo Excel específico"""
+        pass

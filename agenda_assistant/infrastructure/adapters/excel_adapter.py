@@ -23,21 +23,26 @@ class ExcelAgendaAdapter(AgendaRepositoryPort):
         """Carga el DataFrame desde Excel"""
         try:
             return pd.read_excel(self.file_path)
-        except FileNotFoundError:
-            # Crear archivo si no existe
-            df = pd.DataFrame(columns=['Evento', 'Fecha', 'Hora'])
-            df.to_excel(self.file_path, index=False)
-            return df
         except PermissionError as e:
             self.logger.error(f"Sin permisos para acceder al archivo: {e}")
-            raise PermissionError(f"Sin permisos para acceder al archivo: {e}")
+            raise
         except Exception as e:
             self.logger.error(f"Error al cargar archivo Excel: {e}")
-            raise Exception(f"Error al cargar archivo Excel: {e}")
+            raise
     
     def _save_dataframe(self, df: pd.DataFrame):
         """Guarda el DataFrame en Excel"""
-        df.to_excel(self.file_path, index=False)
+        try:
+            df.to_excel(self.file_path, index=False)
+        except PermissionError as e:
+            self.logger.error(f"Sin permisos para escribir archivo: {e}")
+            raise
+        except OSError as e:
+            self.logger.error(f"Error del sistema al escribir archivo: {e}")
+            raise
+        except Exception as e:
+            self.logger.error(f"Error inesperado al guardar Excel: {e}")
+            raise
     
     def save(self, event: AgendaEvent) -> bool:
         """Implementa el puerto: guardar evento"""
@@ -95,4 +100,65 @@ class ExcelAgendaAdapter(AgendaRepositoryPort):
             return False
         except Exception as e:
             self.logger.error(f"Error inesperado al eliminar: {e}")
+            return False
+    
+    def delete_all(self) -> bool:
+        """Implementa el puerto: eliminar todos los eventos"""
+        try:
+            df = self._load_dataframe()
+            initial_count = len(df)
+            
+            if initial_count == 0:
+                return False  # No hay eventos para eliminar
+            
+            # Crear DataFrame vacío con las mismas columnas
+            empty_df = pd.DataFrame(columns=['Evento', 'Fecha', 'Hora'])
+            self._save_dataframe(empty_df)
+            return True
+            
+        except (FileNotFoundError, PermissionError) as e:
+            self.logger.error(f"Error de archivo al eliminar todos: {e}")
+            return False
+        except Exception as e:
+            self.logger.error(f"Error inesperado al eliminar todos: {e}")
+            return False
+    
+    def export_to_excel(self, export_path: str) -> bool:
+        """Exporta la agenda a un archivo Excel específico"""
+        try:
+            df = self._load_dataframe()
+            
+            if df.empty:
+                return False  # No hay eventos para exportar
+            
+            # Asegurar que el directorio existe
+            os.makedirs(os.path.dirname(export_path), exist_ok=True)
+            
+            # Exportar con formato mejorado
+            with pd.ExcelWriter(export_path, engine='openpyxl') as writer:
+                df.to_excel(writer, sheet_name='Agenda', index=False)
+                
+                # Obtener la hoja para formatear
+                worksheet = writer.sheets['Agenda']
+                
+                # Ajustar ancho de columnas
+                for column in worksheet.columns:
+                    max_length = 0
+                    column_letter = column[0].column_letter
+                    for cell in column:
+                        try:
+                            if len(str(cell.value)) > max_length:
+                                max_length = len(str(cell.value))
+                        except:
+                            pass
+                    adjusted_width = min(max_length + 2, 50)
+                    worksheet.column_dimensions[column_letter].width = adjusted_width
+            
+            return True
+            
+        except (FileNotFoundError, PermissionError) as e:
+            self.logger.error(f"Error de archivo al exportar: {e}")
+            return False
+        except Exception as e:
+            self.logger.error(f"Error inesperado al exportar: {e}")
             return False

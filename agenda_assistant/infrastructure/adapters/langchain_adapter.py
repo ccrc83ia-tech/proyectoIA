@@ -8,6 +8,49 @@ from datetime import datetime
 
 class LangChainAgentAdapter(AIAgentPort):
     """Adaptador LangChain que respeta los principios hexagonales."""
+    
+    # Template de prompt como constante de clase
+    PROMPT_TEMPLATE = """
+Eres un asistente de agenda inteligente de {company_name}.
+
+Fecha actual: {current_date}
+Usuario conocido: {user_name}
+Historial reciente: {history}
+
+IMPORTANTE: Si el usuario dice su nombre (ej: "hola, soy camilo"), responde con: NOMBRE|nombre_del_usuario
+
+Si ya conoces al usuario, analiza su consulta y determina qué acción realizar:
+1. Para crear eventos: "AGREGAR|descripcion_evento|YYYY-MM-DD|HH:MM"
+2. Para consultar fecha específica: "CONSULTAR|YYYY-MM-DD"
+3. Para ver todos los eventos: "LISTAR"
+4. Para eliminar evento específico: "ELIMINAR|nombre_evento|YYYY-MM-DD"
+5. Para eliminar TODOS los eventos: "ELIMINAR_TODOS"
+6. Para exportar agenda: "EXPORTAR|ruta_opcional"
+7. Para solicitar información: "INFO|mensaje_al_usuario"
+
+IMPORTANTE: Si el usuario dice solo "eliminar" sin especificar qué evento o fecha, responde: INFO|¿Qué evento quieres eliminar? Por favor especifica el nombre del evento y la fecha.
+
+Ejemplos de interpretación:
+- "crear evento mañana 9 am" → AGREGAR|evento|2024-01-16|09:00
+- "agendar reunión mañana 9" → AGREGAR|reunión|2024-01-16|09:00
+- "ver eventos" o "listar" → LISTAR
+- "qué tengo mañana" → CONSULTAR|2024-01-16
+- "eliminar todos los eventos" → ELIMINAR_TODOS
+- "borrar toda la agenda" → ELIMINAR_TODOS
+- "limpiar agenda" → ELIMINAR_TODOS
+- "exportar agenda" → EXPORTAR
+- "descargar agenda" → EXPORTAR
+- "guardar agenda como" → EXPORTAR|ruta
+
+Calcula fechas relativas basado en {current_date}:
+- "hoy" = {current_date}
+- "mañana" = día siguiente
+- "pasado mañana" = dos días después
+
+Consulta del usuario: {query}
+
+Responde SOLO con el formato de acción correspondiente:
+"""
 
     def __init__(self, agenda_service: AgendaServicePort, api_key: str, company_name: str = "Tu Empresa"):
         if not agenda_service:
@@ -25,44 +68,16 @@ class LangChainAgentAdapter(AIAgentPort):
             temperature=0
         )
         
-        # Prompt template
+        # Prompt template usando constante de clase
         self.prompt = PromptTemplate(
             input_variables=["query", "history", "current_date", "user_name", "company_name"],
-            template="""
-Eres un asistente de agenda inteligente de {company_name}.
-
-Fecha actual: {current_date}
-Usuario conocido: {user_name}
-Historial reciente: {history}
-
-IMPORTANTE: Si el usuario dice su nombre (ej: "hola, soy camilo"), responde con: NOMBRE|nombre_del_usuario
-
-Si ya conoces al usuario, analiza su consulta y determina qué acción realizar:
-1. Para crear eventos: "AGREGAR|descripcion_evento|YYYY-MM-DD|HH:MM"
-2. Para consultar fecha específica: "CONSULTAR|YYYY-MM-DD"
-3. Para ver todos los eventos: "LISTAR"
-4. Para eliminar: "ELIMINAR|nombre_evento|YYYY-MM-DD"
-
-Ejemplos de interpretación:
-- "crear evento mañana 9 am" → AGREGAR|evento|2024-01-16|09:00
-- "agendar reunión mañana 9" → AGREGAR|reunión|2024-01-16|09:00
-- "ver eventos" o "listar" → LISTAR
-- "qué tengo mañana" → CONSULTAR|2024-01-16
-
-Calcula fechas relativas basado en {current_date}:
-- "hoy" = {current_date}
-- "mañana" = día siguiente
-- "pasado mañana" = dos días después
-
-Consulta del usuario: {query}
-
-Responde SOLO con el formato de acción correspondiente:
-"""
+            template=self.PROMPT_TEMPLATE
         )
         
         # Memoria simple para conversación
         self.conversation_history = []
         self.user_name = None
+        self.pending_deletion = None  # Para almacenar eliminación pendiente
 
     def _validate_date(self, fecha: str) -> bool:
         """Valida formato de fecha."""
@@ -83,6 +98,28 @@ Responde SOLO con el formato de acción correspondiente:
         try:
             parts = action.strip().split('|')
             command = parts[0].upper()
+            
+            # Verificar si hay una eliminación pendiente de confirmación
+            if self.pending_deletion:
+                if command in ["SI", "SÍ", "YES", "CONFIRMAR"] or "sí" in action.lower() or "si" in action.lower():
+                    # Ejecutar eliminación pendiente
+                    pending = self.pending_deletion
+                    self.pending_deletion = None
+                    
+                    if pending["type"] == "single":
+                        result = self.agenda_service.delete_event(pending["evento"], pending["fecha"])
+                        return f"{self.user_name}, {result}"
+                    elif pending["type"] == "all":
+                        result = self.agenda_service.delete_all_events()
+                        return f"{self.user_name}, {result}"
+                        
+                elif command in ["NO", "CANCELAR", "CANCEL"] or "no" in action.lower():
+                    # Cancelar eliminación
+                    self.pending_deletion = None
+                    return f"{self.user_name}, eliminación cancelada."
+                else:
+                    # Respuesta no clara, pedir confirmación nuevamente
+                    return f"{self.user_name}, por favor responde 'sí' para confirmar o 'no' para cancelar la eliminación."
             
             if command == "NOMBRE" and len(parts) == 2:
                 _, nombre = parts
@@ -117,15 +154,46 @@ Responde SOLO con el formato de acción correspondiente:
                     return f"{self.user_name}, el nombre del evento no puede estar vacío"
                 if not self._validate_date(fecha):
                     return f"{self.user_name}, la fecha '{fecha}' no es válida. Usa formato YYYY-MM-DD"
-                result = self.agenda_service.delete_event(evento.strip(), fecha)
-                return f"{self.user_name}, {result}"
+                
+                # Verificar si el evento existe antes de pedir confirmación
+                events = self.agenda_service._repository.find_by_date(fecha)
+                event_exists = any(e.evento.lower() == evento.strip().lower() for e in events)
+                
+                if not event_exists:
+                    return f"{self.user_name}, no se encontró el evento '{evento.strip()}' en la fecha {fecha}"
+                
+                # Guardar eliminación pendiente y pedir confirmación
+                self.pending_deletion = {"type": "single", "evento": evento.strip(), "fecha": fecha}
+                return f"{self.user_name}, ¿estás seguro de que quieres eliminar el evento '{evento.strip()}' del {fecha}? Responde 'sí' para confirmar o 'no' para cancelar."
             
             elif command == "LISTAR":
                 result = self.agenda_service.get_all_events()
                 return f"{self.user_name}, {result}"
             
+            elif command == "ELIMINAR_TODOS":
+                # Verificar si hay eventos antes de pedir confirmación
+                events = self.agenda_service._repository.find_all()
+                
+                if not events:
+                    return f"{self.user_name}, no hay eventos para eliminar"
+                
+                # Guardar eliminación pendiente y pedir confirmación
+                self.pending_deletion = {"type": "all"}
+                return f"{self.user_name}, ¿estás seguro de que quieres eliminar TODOS los eventos de tu agenda? Esta acción no se puede deshacer. Responde 'sí' para confirmar o 'no' para cancelar."
+            
+            elif command == "EXPORTAR":
+                export_path = None
+                if len(parts) == 2:
+                    export_path = parts[1].strip()
+                result = self.agenda_service.export_agenda(export_path)
+                return f"{self.user_name}, {result}"
+            
+            elif command == "INFO" and len(parts) == 2:
+                _, mensaje = parts
+                return f"{self.user_name}, {mensaje.strip()}"
+            
             else:
-                return f"¡Hola {self.user_name}! Puedo ayudarte con tu agenda. Ejemplos:\n- 'Agregar reunión mañana 10:30'\n- '¿Qué tengo el 2024-01-15?'\n- 'Eliminar reunión'"
+                return f"¡Hola {self.user_name}! Puedo ayudarte con tu agenda. Ejemplos:\n- 'Agregar reunión mañana 10:30'\n- '¿Qué tengo el 2024-01-15?'\n- 'Eliminar reunión'\n- 'Eliminar todos los eventos'\n- 'Exportar agenda'"
                 
         except Exception as e:
             user_prefix = f"{self.user_name}, " if self.user_name else ""
@@ -144,8 +212,8 @@ Responde SOLO con el formato de acción correspondiente:
                     # Solo una palabra alfabética = nombre
                     self.user_name = query.strip().capitalize()
                     return f"¡Hola {self.user_name}! Es un placer conocerte. Soy tu asistente de agenda de {self.company_name} y estoy aquí para ayudarte con la gestión de tu agenda personal."
-                elif "soy" in query_lower or "me llamo" in query_lower:
-                    # Extraer nombre de frases como "hola, soy camilo" o "me llamo juan"
+                elif "soy" in query_lower or "me llamo" in query_lower or "mi nombre es" in query_lower:
+                    # Extraer nombre de frases como "hola, soy camilo" o "me llamo juan" o "mi nombre es camilo"
                     words = query_lower.replace(",", "").split()
                     if "soy" in words:
                         idx = words.index("soy")
@@ -155,6 +223,14 @@ Responde SOLO con el formato de acción correspondiente:
                         idx = words.index("llamo")
                         if idx + 1 < len(words):
                             self.user_name = words[idx + 1].capitalize()
+                    elif "nombre" in words and "es" in words:
+                        # Para "mi nombre es camilo"
+                        try:
+                            es_idx = words.index("es")
+                            if es_idx + 1 < len(words):
+                                self.user_name = words[es_idx + 1].capitalize()
+                        except ValueError:
+                            pass
                     
                     if self.user_name:
                         return f"¡Hola {self.user_name}! Es un placer conocerte. Soy tu asistente de agenda de {self.company_name} y estoy aquí para ayudarte con la gestión de tu agenda personal."
@@ -195,7 +271,15 @@ Responde SOLO con el formato de acción correspondiente:
             
             return response
             
+        except ValueError as e:
+            error_msg = f"❌ Error de validación: {str(e)}"
+            self.conversation_history.append(f"Asistente: {error_msg}")
+            return error_msg
+        except ConnectionError as e:
+            error_msg = f"❌ Error de conexión con el servicio IA: {str(e)}"
+            self.conversation_history.append(f"Asistente: {error_msg}")
+            return error_msg
         except Exception as e:
-            error_msg = f"❌ Error: {str(e)}"
+            error_msg = f"❌ Error inesperado: {str(e)}"
             self.conversation_history.append(f"Asistente: {error_msg}")
             return error_msg
